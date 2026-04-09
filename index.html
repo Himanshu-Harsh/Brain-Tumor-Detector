@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeuroScan | Brain MRI Classifier</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/ort.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Box Sizing & Reset ── */
+*, *::before, *::after {
+  margin: 0; padding: 0; box-sizing: border-box;
+}
+
+:root {
+  --bg-deep:       #020617;
+  --bg-dim:        #0f172a;
+  --surface:       rgba(255, 255, 255, 0.03);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --border:        rgba(255, 255, 255, 0.1);
+  --border-glow:   rgba(45, 212, 191, 0.5);
+  
+  --text:          #f8fafc;
+  --text-muted:    #94a3b8;
+  
+  --teal:          #2dd4bf;
+  --teal-glow:     rgba(45, 212, 191, 0.15);
+  --rose:          #fb7185;
+  --rose-glow:     rgba(251, 113, 133, 0.15);
+  
+  --font-sans:     'Outfit', sans-serif;
+  --font-mono:     'JetBrains Mono', monospace;
+}
+
+html { font-size: 16px; }
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-deep);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Dynamic Background ── */
+.bg-orb {
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  max-width: 600px;
+  max-height: 600px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45,212,191,0.15) 0%, rgba(251,113,133,0.05) 50%, rgba(0,0,0,0) 70%);
+  top: -10%;
+  left: 50%;
+  transform: translateX(-50%);
+  filter: blur(80px);
+  z-index: -1;
+  animation: pulseOrb 10s infinite alternate linear;
+}
+
+@keyframes pulseOrb {
+  0% { transform: translateX(-50%) scale(1); opacity: 0.8; }
+  100% { transform: translateX(-50%) scale(1.1); opacity: 1; }
+}
+
+.wrap {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  z-index: 1;
+}
+
+/* ── Masthead ── */
+.masthead {
+  text-align: center;
+  margin-bottom: 3rem;
+  animation: fadeDown 0.6s ease-out;
+}
+
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--teal);
+  display: block;
+  margin-bottom: 1rem;
+}
+
+h1 {
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #fff, #94a3b8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+h1 strong {
+  font-weight: 700;
+  background: linear-gradient(135deg, #2dd4bf, #0ea5e9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.lede {
+  margin: 1.25rem auto 0;
+  font-size: 1.15rem;
+  font-weight: 300;
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 540px;
+}
+
+/* ── Glass Container ── */
+.glass-panel {
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 2.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+  animation: fadeInUp 0.8s ease-out;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Status ── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2rem;
+}
+
+.pip {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 0 rgba(255,255,255,0.2);
+  transition: all 0.4s;
+}
+.pip.ok  { 
+  background: var(--teal); 
+  box-shadow: 0 0 10px 2px var(--teal-glow); 
+}
+.pip.err { 
+  background: var(--rose); 
+  box-shadow: 0 0 10px 2px var(--rose-glow); 
+}
+
+.status-text {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Drop zone ── */
+.drop {
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  padding: 4.5rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgba(0,0,0,0.2);
+}
+.drop:hover, .drop.over {
+  background: var(--surface-hover);
+  border-color: var(--border-glow);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -10px var(--teal-glow);
+}
+.drop input { display: none; }
+
+.drop-icon {
+  display: block;
+  width: 48px; height: 48px;
+  margin: 0 auto 1.5rem;
+  stroke: var(--teal);
+  stroke-width: 1.5;
+  fill: none;
+  filter: drop-shadow(0 0 8px var(--teal-glow));
+  transition: transform 0.3s;
+}
+.drop:hover .drop-icon {
+  transform: scale(1.1);
+}
+
+.drop-title {
+  font-size: 1.25rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.drop-hint {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+/* ── Preview panel ── */
+.panel { display: none; animation: fadeIn 0.4s; }
+.panel.on { display: block; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.scan-row {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 600px) {
+  .scan-row { flex-direction: column; text-align: center; }
+}
+
+.scan-thumb {
+  width: 160px; height: 160px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+}
+.scan-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: grayscale(20%) contrast(1.1);
+  transition: transform 0.5s;
+}
+.scan-thumb:hover img { transform: scale(1.05); }
+
+.scan-info { flex-grow: 1; }
+
+.scan-name {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-all;
+  margin-bottom: 0.4rem;
+}
+
+.scan-meta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+  letter-spacing: 0.05em;
+}
+
+.btns { 
+  display: flex; 
+  gap: 1rem; 
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .btns { justify-content: center; }
+}
+
+button {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 0.75rem 1.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--teal), #0ea5e9);
+  color: #000;
+  box-shadow: 0 4px 15px var(--teal-glow);
+}
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px var(--teal-glow);
+}
+.btn-primary:disabled {
+  background: var(--surface);
+  color: var(--text-muted);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  background: var(--surface-hover);
+  border-color: var(--text-muted);
+}
+
+/* ── Loader ── */
+.loader { display: none; padding: 3rem 0; text-align: center; }
+.loader.on { display: block; animation: fadeIn 0.3s; }
+
+.spin {
+  width: 40px; height: 40px;
+  border: 3px solid var(--surface-hover);
+  border-top-color: var(--teal);
+  border-radius: 50%;
+  animation: spin 1s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite;
+  margin: 0 auto 1.25rem;
+  filter: drop-shadow(0 0 8px var(--teal-glow));
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loader-txt {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--teal);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  animation: pulseText 1.5s infinite alternate;
+}
+@keyframes pulseText {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+/* ── Results ── */
+.results { display: none; }
+.results.on { display: block; animation: fadeInUp 0.6s ease-out; }
+
+.result-rule {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.5rem 0;
+}
+
+.verdict-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 2.5rem;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.4rem 1rem;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.tag::before {
+  content: '';
+  display: block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+}
+.tag.tumor   { 
+  background: var(--rose-glow); 
+  color: var(--rose); 
+  border: 1px solid rgba(251, 113, 133, 0.3);
+}
+.tag.tumor::before { background: var(--rose); box-shadow: 0 0 8px var(--rose); }
+
+.tag.healthy { 
+  background: var(--teal-glow); 
+  color: var(--teal); 
+  border: 1px solid rgba(45, 212, 191, 0.3);
+}
+.tag.healthy::before { background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+
+.verdict-label {
+  font-size: 2.5rem;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.bars-head {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.bar-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.bar-label {
+  width: 140px;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.bar-label.top { color: var(--text); font-weight: 600; }
+
+.bar-track {
+  flex-grow: 1;
+  height: 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  width: 0%;
+  background: var(--text-muted);
+  transition: width 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.bar-fill.top { 
+  background: linear-gradient(90deg, var(--teal), #0ea5e9);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.5);
+}
+.tag.tumor ~ .bar-list .bar-fill.top {
+  background: linear-gradient(90deg, var(--rose), #f43f5e);
+  box-shadow: 0 0 10px rgba(251, 113, 133, 0.5);
+}
+
+.bar-pct {
+  width: 60px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  text-align: right;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.bar-pct.top { color: var(--text); font-weight: 600; }
+
+/* ── Footnote ── */
+.footnote {
+  margin-top: 3.5rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  opacity: 0.6;
+}
+
+</style>
+</head>
+<body>
+
+<div class="bg-orb"></div>
+
+<div class="wrap">
+  <header class="masthead">
+    <span class="kicker">Diagnostic Research Subsystem</span>
+    <h1><strong>NeuroScan</strong> Classifier</h1>
+    <p class="lede">Upload a structural brain MRI scan for automated inference using ONNX Runtime. Supports 4-class categorization.</p>
+  </header>
+
+  <div class="glass-panel">
+    <div class="status-bar">
+      <div class="pip" id="pip"></div>
+      <span class="status-text" id="statusText">Initializing model&hellip;</span>
+    </div>
+
+    <div class="drop" id="drop">
+      <svg class="drop-icon" viewBox="0 0 24 24">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p class="drop-title">Drop MRI image here</p>
+      <p class="drop-hint">or click to browse &mdash; JPG, PNG</p>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+
+    <div class="panel" id="panel">
+      <div class="scan-row">
+        <div class="scan-thumb">
+          <img id="thumb" alt="MRI scan preview">
+        </div>
+        <div class="scan-info">
+          <div class="scan-name" id="scanName"></div>
+          <div class="scan-meta" id="scanMeta"></div>
+          <div class="btns">
+            <button class="btn-primary" id="runBtn" disabled>Run Inference</button>
+            <button class="btn-secondary" id="clearBtn">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="loader" id="loader">
+        <div class="spin"></div>
+        <p class="loader-txt">Analyzing scan</p>
+      </div>
+
+      <div class="results" id="results">
+        <hr class="result-rule">
+        <div class="verdict-row">
+          <span class="tag" id="tag"></span>
+          <span class="verdict-label" id="verdictLabel"></span>
+        </div>
+        <p class="bars-head">Confidence Distribution</p>
+        <div class="bar-list" id="barList"></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="footnote">
+    For research and educational purposes only. This tool is not a substitute for evaluation<br>
+    by a qualified radiologist or neurologist and should not be used for clinical decision-making.
+  </p>
+</div>
+
+<script>
+  const CLASSES = ['glioma', 'meningioma', 'notumor', 'pituitary'];
+  const LABELS  = { glioma: 'Glioma Detection', meningioma: 'Meningioma Detection', notumor: 'No Tumor', pituitary: 'Pituitary Tumor Detection' };
+  const MEAN    = [0.485, 0.456, 0.406];
+  const STD     = [0.229, 0.224, 0.225];
+  const SZ      = 256;
+
+  let session = null;
+  let file    = null;
+
+  const pip        = document.getElementById('pip');
+  const statusText = document.getElementById('statusText');
+  const drop       = document.getElementById('drop');
+  const fileInput  = document.getElementById('fileInput');
+  const panel      = document.getElementById('panel');
+  const thumb      = document.getElementById('thumb');
+  const scanName   = document.getElementById('scanName');
+  const scanMeta   = document.getElementById('scanMeta');
+  const runBtn     = document.getElementById('runBtn');
+  const clearBtn   = document.getElementById('clearBtn');
+  const loader     = document.getElementById('loader');
+  const results    = document.getElementById('results');
+
+  async function loadModel() {
+    try {
+      session = await ort.InferenceSession.create('./brain_tumor_model.onnx');
+      pip.classList.add('ok');
+      statusText.textContent = 'System Ready';
+      if (file) runBtn.disabled = false;
+    } catch (e) {
+      pip.classList.add('err');
+      statusText.textContent = 'Model error — Ensure brain_tumor_model.onnx is present';
+      console.error(e);
+    }
+  }
+  loadModel();
+
+  drop.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+  drop.addEventListener('dragover',  e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+
+  function handleFile(f) {
+    if (!f || !f.type.startsWith('image/')) return;
+    file = f;
+    thumb.src = URL.createObjectURL(f);
+    scanName.textContent = f.name;
+    scanMeta.textContent = (f.size / 1024).toFixed(1) + ' KB';
+    drop.style.display = 'none';
+    panel.classList.add('on');
+    results.classList.remove('on');
+    if (session) runBtn.disabled = false;
+  }
+
+  clearBtn.addEventListener('click', () => {
+    file = null;
+    fileInput.value = '';
+    panel.classList.remove('on');
+    results.classList.remove('on');
+    loader.classList.remove('on');
+    drop.style.display = '';
+  });
+
+  // Preprocessing — 256×256, CHW, ImageNet normalisation
+  function preprocess(img) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = SZ;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, SZ, SZ);
+    const { data } = ctx.getImageData(0, 0, SZ, SZ);
+    const f32 = new Float32Array(3 * SZ * SZ);
+    for (let y = 0; y < SZ; y++)
+      for (let x = 0; x < SZ; x++) {
+        const i = (y * SZ + x) * 4;
+        for (let ch = 0; ch < 3; ch++)
+          f32[ch * SZ * SZ + y * SZ + x] = (data[i + ch] / 255 - MEAN[ch]) / STD[ch];
+      }
+    return new ort.Tensor('float32', f32, [1, 3, SZ, SZ]);
+  }
+
+  function softmax(arr) {
+    const m = Math.max(...arr);
+    const e = arr.map(v => Math.exp(v - m));
+    const s = e.reduce((a, b) => a + b, 0);
+    return e.map(v => v / s);
+  }
+
+  runBtn.addEventListener('click', async () => {
+    if (!session || !file) return;
+    runBtn.disabled = true;
+    results.classList.remove('on');
+    loader.classList.add('on');
+
+    const img = new window.Image();
+    img.src = thumb.src;
+    await new Promise(r => img.onload = r);
+
+    // Give UI time to paint loader
+    setTimeout(async () => {
+      try {
+        const tensor = preprocess(img);
+        const out    = await session.run({ input: tensor });
+        const probs  = softmax(Array.from(out.output.data));
+        const best   = probs.indexOf(Math.max(...probs));
+
+        loader.classList.remove('on');
+        render(CLASSES[best], probs);
+      } catch(err) {
+        console.error(err);
+        loader.classList.remove('on');
+      }
+      runBtn.disabled = false;
+    }, 100);
+  });
+
+  function render(predClass, probs) {
+    const tagEl   = document.getElementById('tag');
+    const labelEl = document.getElementById('verdictLabel');
+    const listEl  = document.getElementById('barList');
+    const isTumor = predClass !== 'notumor';
+
+    tagEl.className   = 'tag ' + (isTumor ? 'tumor' : 'healthy');
+    tagEl.innerHTML   = isTumor ? 'Anomaly Detected' : 'No Tumor Found';
+    labelEl.textContent = LABELS[predClass];
+
+    const sorted = CLASSES
+      .map((c, i) => ({ c, p: probs[i] }))
+      .sort((a, b) => b.p - a.p);
+
+    listEl.innerHTML = sorted.map(({ c, p }, i) => `
+      <div class="bar-item">
+        <span class="bar-label ${i === 0 ? 'top' : ''}">${LABELS[c]}</span>
+        <div class="bar-track">
+          <div class="bar-fill ${i === 0 ? 'top' : ''}" data-w="${p * 100}"></div>
+        </div>
+        <span class="bar-pct ${i === 0 ? 'top' : ''}">${(p * 100).toFixed(1)}%</span>
+      </div>
+    `).join('');
+
+    results.classList.add('on');
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      listEl.querySelectorAll('.bar-fill').forEach(el => {
+        el.style.width = el.dataset.w + '%';
+      });
+    }));
+  }
+</script>
+</body>
+</html>
